@@ -15,7 +15,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -73,6 +72,16 @@ class NewsServiceTest {
                 .publishLatestNews();
 
         verifyNoInteractions(sender);
+
+        new NewsService(List.of(new Source("Mixed", List.of(
+                new NewsData(), news("First", "First body."), news("Empty", ""),
+                news("Second", "Second body.")))), sender, CLOCK).publishLatestNews();
+
+        ArgumentCaptor<String> messages = ArgumentCaptor.forClass(String.class);
+        verify(sender, times(2)).sendMessage(messages.capture());
+        assertThat(messages.getAllValues()).satisfiesExactly(
+                message -> assertThat(message).contains("First", "First body."),
+                message -> assertThat(message).contains("Second", "Second body."));
     }
 
     @Test
@@ -153,7 +162,7 @@ class NewsServiceTest {
         NewsData item = new NewsData();
         item.setTitle(title);
         item.setDescription(description);
-        item.setDate(Date.from(NOW));
+        item.setDate(NOW);
         return item;
     }
 

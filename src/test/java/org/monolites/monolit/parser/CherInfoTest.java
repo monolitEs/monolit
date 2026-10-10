@@ -20,7 +20,6 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -92,7 +91,7 @@ class CherInfoTest {
 
         assertThat(parser.getName()).isEqualTo("ЧерИнфо");
         assertThat(news).extracting(NewsData::getTitle).containsExactly("News 1", "News 2");
-        assertThat(news.getFirst().getDate()).isEqualTo(Date.from(date(1)));
+        assertThat(news.getFirst().getDate()).isEqualTo(date(1));
         assertThat(news.getFirst().getDescription()).isEqualTo("First & second.\n\nLast paragraph.\n\n");
         assertThat(news.getFirst().getImages()).hasSize(2);
         for (File image : news.getFirst().getImages().values()) {

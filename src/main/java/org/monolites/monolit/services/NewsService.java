@@ -43,17 +43,16 @@ public class NewsService {
         List<NewsData> news = parser.parseData();
         try {
             for (NewsData item : news) {
-                if (item.isEmpty()) {
-                    continue;
-                }
-                List<File> images = item.getImages() == null
-                        ? List.of()
-                        : item.getImages().values().stream().limit(MAX_IMAGE_COUNT).toList();
-                try {
-                    sendNewsMessages(formatMessage(parser, item), images);
-                } catch (Exception e) {
-                    log.warn("Failed to send news from {}", parser.getName(), e);
-                    break;
+                if (!item.isEmpty()) {
+                    List<File> images = item.getImages() == null
+                            ? List.of()
+                            : item.getImages().values().stream().limit(MAX_IMAGE_COUNT).toList();
+                    try {
+                        sendNewsMessages(formatMessage(parser, item), images);
+                    } catch (Exception e) {
+                        log.warn("Failed to send news from {}", parser.getName(), e);
+                        break;
+                    }
                 }
             }
         } finally {
@@ -134,7 +133,7 @@ public class NewsService {
     private String formatMessage(Parser parser, NewsData news) {
         String publishedAt = news.getDate() == null
                 ? "Дата не указана"
-                : DATE_FORMAT.withZone(newsClock.getZone()).format(news.getDate().toInstant());
+                : DATE_FORMAT.withZone(newsClock.getZone()).format(news.getDate());
         return "Новость %s%n%n%s%n%s%n%n%s".formatted(
                 parser.getName(), news.getTitle(), publishedAt, news.getDescription());
     }

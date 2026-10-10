@@ -4,7 +4,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.io.File;
-import java.util.Date;
+import java.time.Instant;
 import java.util.Map;
 
 @Getter
@@ -12,7 +12,7 @@ import java.util.Map;
 public class NewsData {
     private String title;
     private String description;
-    private Date date;
+    private Instant date;
     private Map<String, File> images;
 
     public boolean isEmpty(){

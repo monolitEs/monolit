@@ -40,7 +40,7 @@ public class CherInfo implements Parser {
         for (SyndEntry entry : feed.getEntries()) {
             NewsData newsData = getNews(entry.getLink());
             newsData.setTitle(entry.getTitle());
-            newsData.setDate(entry.getPublishedDate());
+            newsData.setDate(entry.getPublishedDate().toInstant());
 
             newsList.add(newsData);
         }
@@ -120,7 +120,7 @@ public class CherInfo implements Parser {
         Map<String, File> result = new HashMap<>();
 
         for (Element img : images) {
-            String link = img.attr("href").isEmpty() ? img.attr("src") : img.attr("href");
+            String link = img.attr(img.attr("href").isEmpty() ? "src" : "href");
             ImageDto imageDto = ImageDownloader.downloadImage(link);
             File file = new File(imageDto.getPath().toUri());
             result.put(imageDto.getName(), file);
