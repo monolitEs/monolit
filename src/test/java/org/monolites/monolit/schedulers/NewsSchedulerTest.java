@@ -1,7 +1,7 @@
 package org.monolites.monolit.schedulers;
 
 import org.junit.jupiter.api.Test;
-import org.monolites.monolit.services.CherinfoNewsService;
+import org.monolites.monolit.services.NewsService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -18,11 +18,11 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
-class CherinfoNewsSchedulerTest {
+class NewsSchedulerTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withUserConfiguration(SchedulerConfiguration.class)
-            .withBean(CherinfoNewsService.class, () -> mock(CherinfoNewsService.class))
+            .withBean(NewsService.class, () -> mock(NewsService.class))
             .withPropertyValues(
                     "monolit.news.cherinfo.cron=0 0 0 1 1 *",
                     "monolit.news.zone=Europe/Moscow"
@@ -41,20 +41,20 @@ class CherinfoNewsSchedulerTest {
     @Test
     void enablesStartupAndScheduledPublicationWhenExplicitlyRequested() {
         contextRunner.withPropertyValues("monolit.news.cherinfo.enabled=true").run(context -> {
-            assertThat(context).hasSingleBean(CherinfoNewsScheduler.class);
+            assertThat(context).hasSingleBean(NewsScheduler.class);
             assertThat(context.getBean(ScheduledAnnotationBeanPostProcessor.class).getScheduledTasks()).hasSize(1);
             context.publishEvent(new ApplicationReadyEvent(
                     new SpringApplication(SchedulerConfiguration.class), new String[0],
                     context.getSourceApplicationContext(), Duration.ZERO
             ));
-            verify(context.getBean(CherinfoNewsService.class)).publishLatestNews();
+            verify(context.getBean(NewsService.class)).publishLatestNews();
         });
     }
 
     @Test
     void delegatesStartupAndHourlyPublication() {
-        CherinfoNewsService service = mock(CherinfoNewsService.class);
-        CherinfoNewsScheduler scheduler = new CherinfoNewsScheduler(service);
+        NewsService service = mock(NewsService.class);
+        NewsScheduler scheduler = new NewsScheduler(service);
 
         scheduler.publishNewsOnStartup();
         scheduler.publishNewsHourly();
@@ -64,19 +64,19 @@ class CherinfoNewsSchedulerTest {
 
     private void assertPublicationDisabled(ApplicationContextRunner runner) {
         runner.run(context -> {
-            assertThat(context).doesNotHaveBean(CherinfoNewsScheduler.class);
+            assertThat(context).doesNotHaveBean(NewsScheduler.class);
             assertThat(context.getBean(ScheduledAnnotationBeanPostProcessor.class).getScheduledTasks()).isEmpty();
             context.publishEvent(new ApplicationReadyEvent(
                     new SpringApplication(SchedulerConfiguration.class), new String[0],
                     context.getSourceApplicationContext(), Duration.ZERO
             ));
-            verifyNoInteractions(context.getBean(CherinfoNewsService.class));
+            verifyNoInteractions(context.getBean(NewsService.class));
         });
     }
 
     @Configuration(proxyBeanMethods = false)
     @EnableScheduling
-    @Import(CherinfoNewsScheduler.class)
+    @Import(NewsScheduler.class)
     static class SchedulerConfiguration {
     }
 }
