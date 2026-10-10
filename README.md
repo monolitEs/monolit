@@ -21,7 +21,9 @@ java -jar target/monolit-0.0.1-SNAPSHOT.jar
 Для запуска из исходников: `mvn spring-boot:run`.
 
 Конкретных обработчиков бизнес-действий и меню в каркасе нет.
-Автопубликация новостей выключена; включение: `MONOLIT_NEWS_CHERINFO_ENABLED=true`.
+Новости Cherinfo публикуются при запуске и каждый час. Без сохранённой даты берутся
+пять последних новостей; после перезапуска дата восстанавливается из PostgreSQL.
+Отключение: `MONOLIT_NEWS_CHERINFO_ENABLED=false`.
 Таблицы создаются и обновляются через Hibernate `ddl-auto=update`.
 
 ## Docker и GitHub Actions

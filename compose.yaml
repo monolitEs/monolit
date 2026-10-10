@@ -13,7 +13,7 @@ services:
       VK_GROUP_ID: ${VK_GROUP_ID:?Set VK_GROUP_ID}
       VK_GROUP_TOKEN: ${VK_GROUP_TOKEN:?Set VK_GROUP_TOKEN}
       VK_MY_ID: ${VK_MY_ID:?Set VK_MY_ID}
-      MONOLIT_NEWS_CHERINFO_ENABLED: "false"
+      MONOLIT_NEWS_CHERINFO_ENABLED: ${MONOLIT_NEWS_CHERINFO_ENABLED:-true}
     networks:
       - database
     restart: unless-stopped

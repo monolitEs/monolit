@@ -7,6 +7,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.monolites.monolit.models.dtos.NewsData;
 import org.monolites.monolit.models.exception.NewsParseException;
+import org.monolites.monolit.models.entities.NewsParserState;
+import org.monolites.monolit.repositories.NewsParserStateRepository;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.File;
@@ -23,11 +25,19 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Date;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.never;
 
 class CherInfoTest {
 
@@ -38,11 +48,13 @@ class CherInfoTest {
     private final AtomicInteger articleRequests = new AtomicInteger();
     private final Map<String, String> pages = new HashMap<>();
     private final List<NewsData> parsedNews = new ArrayList<>();
+    private final AtomicReference<NewsParserState> storedState = new AtomicReference<>();
     private final Path imagesDirectory = Path.of("images").toAbsolutePath();
     private HttpServer server;
     private Parser parser;
     private String baseUrl;
     private boolean imagesDirectoryExisted;
+    private NewsParserStateRepository stateRepository;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -51,8 +63,14 @@ class CherInfoTest {
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
         server.createContext("/", this::respond);
         server.start();
-        parser = new CherInfo();
-        ReflectionTestUtils.setField(parser, "rssLink", baseUrl + "/rss");
+        stateRepository = mock(NewsParserStateRepository.class);
+        when(stateRepository.findById("cherinfo")).thenAnswer(invocation -> Optional.ofNullable(storedState.get()));
+        when(stateRepository.save(any(NewsParserState.class))).thenAnswer(invocation -> {
+            NewsParserState state = invocation.getArgument(0);
+            storedState.set(state);
+            return state;
+        });
+        restartParser();
     }
 
     @AfterEach
@@ -101,7 +119,7 @@ class CherInfoTest {
     }
 
     @Test
-    void skipsUnchangedFeedAndUsesOriginalSelectionWhenAnotherArticleAppears() {
+    void skipsUnchangedFeedAndOnlyReadsStrictlyNewerArticles() {
         rss.set(feed(2, 1));
         assertThat(parse()).extracting(NewsData::getTitle).containsExactly("News 1", "News 2");
         assertThat(parse()).isEmpty();
@@ -109,21 +127,23 @@ class CherInfoTest {
 
         rss.set(feed(3, 2, 1));
 
-        // The source intentionally includes the entry at lastPubDate in the next batch.
-        assertThat(parse()).extracting(NewsData::getTitle).containsExactly("News 2", "News 3");
-        assertThat(articleRequests).hasValue(4);
+        assertThat(parse()).extracting(NewsData::getTitle).containsExactly("News 3");
+        assertThat(articleRequests).hasValue(3);
+        verify(stateRepository, times(1)).findById("cherinfo");
+        assertThat(storedState.get().getLastPubDate()).isEqualTo(date(3));
     }
 
     @Test
-    void preservesOriginalInitialWindowOfSixEntries() {
+    void readsOnlyFiveLatestEntriesOnFirstRun() {
         rss.set(feed(7, 6, 5, 4, 3, 2, 1));
 
         assertThat(parse()).extracting(NewsData::getTitle)
-                .containsExactly("News 2", "News 3", "News 4", "News 5", "News 6", "News 7");
+                .containsExactly("News 3", "News 4", "News 5", "News 6", "News 7");
+        assertThat(storedState.get().getLastPubDate()).isEqualTo(date(7));
     }
 
     @Test
-    void downloadsInlineImageAndFreshParserReadsInitialBatchAgain() throws IOException {
+    void downloadsInlineImageAndRestoresCheckpointAfterRestart() throws IOException {
         rss.set(feed(1));
         pages.put("/news/1", "<div class='article-text'><p>Inline photo.<img src='" + baseUrl + "/image/1'></p></div>");
         NewsData item = parse().getFirst();
@@ -133,9 +153,10 @@ class CherInfoTest {
         assertThat(Files.readAllBytes(item.getImages().values().iterator().next().toPath())).isEqualTo(IMAGE);
         assertThat(parse()).isEmpty();
 
-        parser = new CherInfo();
-        ReflectionTestUtils.setField(parser, "rssLink", baseUrl + "/rss");
-        assertThat(parse()).extracting(NewsData::getTitle).containsExactly("News 1");
+        restartParser();
+        assertThat(parse()).isEmpty();
+        assertThat(articleRequests).hasValue(1);
+        verify(stateRepository, times(2)).findById("cherinfo");
     }
 
     @Test
@@ -145,6 +166,71 @@ class CherInfoTest {
 
         assertThatThrownBy(this::parse).isInstanceOf(NewsParseException.class)
                 .hasCauseInstanceOf(IOException.class);
+        // Keep the original checkpoint timing: selection precedes article parsing.
+        assertThat(storedState.get().getLastPubDate()).isEqualTo(date(1));
+        assertThat(ReflectionTestUtils.getField(parser, "lastPubDate")).isEqualTo(Date.from(date(1)));
+    }
+
+    @Test
+    void readsAllNewEntriesEvenWhenMoreThanFiveAppeared() {
+        storeCheckpoint(date(1));
+        rss.set(feed(8, 7, 6, 5, 4, 3, 2, 1));
+
+        assertThat(parse()).extracting(NewsData::getTitle)
+                .containsExactly("News 2", "News 3", "News 4", "News 5", "News 6", "News 7", "News 8");
+    }
+
+    @Test
+    void keepsMemoryCheckpointWhenDatabaseHasAnOlderValue() {
+        storeCheckpoint(date(1));
+        ReflectionTestUtils.setField(parser, "lastPubDate", Date.from(date(3)));
+        rss.set(feed(4, 3, 2, 1));
+
+        assertThat(parse()).extracting(NewsData::getTitle).containsExactly("News 4");
+        verify(stateRepository, never()).findById("cherinfo");
+    }
+
+    @Test
+    void treatsNullDateInDatabaseAsFirstRun() {
+        storeCheckpoint(null);
+        rss.set(feed(6, 5, 4, 3, 2, 1));
+
+        assertThat(parse()).extracting(NewsData::getTitle)
+                .containsExactly("News 2", "News 3", "News 4", "News 5", "News 6");
+    }
+
+    @Test
+    void doesNotParseOrResetStateWhenDatabaseReadFails() {
+        when(stateRepository.findById("cherinfo")).thenThrow(new IllegalStateException("Database unavailable"));
+
+        assertThatThrownBy(this::parse).hasMessage("Database unavailable");
+        assertThat(articleRequests).hasValue(0);
+        assertThat(ReflectionTestUtils.getField(parser, "lastPubDate")).isNull();
+    }
+
+    @Test
+    void databaseWriteFailureKeepsBothCheckpoints() {
+        storeCheckpoint(date(1));
+        rss.set(feed(2, 1));
+        when(stateRepository.save(any(NewsParserState.class))).thenThrow(new IllegalStateException("Write failure"));
+
+        assertThatThrownBy(this::parse).hasMessage("Write failure");
+
+        assertThat(storedState.get().getLastPubDate()).isEqualTo(date(1));
+        assertThat(ReflectionTestUtils.getField(parser, "lastPubDate")).isEqualTo(Date.from(date(1)));
+        assertThat(articleRequests).hasValue(0);
+    }
+
+    private void storeCheckpoint(Instant date) {
+        NewsParserState state = new NewsParserState();
+        state.setSourceKey("cherinfo");
+        state.setLastPubDate(date);
+        storedState.set(state);
+    }
+
+    private void restartParser() {
+        parser = new CherInfo(stateRepository);
+        ReflectionTestUtils.setField(parser, "rssLink", baseUrl + "/rss");
     }
 
     private List<NewsData> parse() {
