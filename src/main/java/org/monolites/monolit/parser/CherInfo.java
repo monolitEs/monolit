@@ -1,8 +1,12 @@
 package org.monolites.monolit.parser;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.monolites.monolit.models.dtos.ImageDto;
 import org.monolites.monolit.models.dtos.NewsData;
 import org.monolites.monolit.models.exception.NewsParseException;
+import org.monolites.monolit.models.entities.NewsParserState;
+import org.monolites.monolit.repositories.NewsParserStateRepository;
 import org.monolites.monolit.parser.utils.ImageDownloader;
 import org.monolites.monolit.parser.utils.RssData;
 import com.rometools.rome.feed.synd.SyndEntry;
@@ -19,7 +23,13 @@ import java.io.IOException;
 import java.util.*;
 
 @Component
+@RequiredArgsConstructor
+@Slf4j
 public class CherInfo implements Parser {
+
+    private static final String SOURCE_KEY = "cherinfo";
+    private static final int INITIAL_NEWS_COUNT = 5;
+    private final NewsParserStateRepository stateRepository;
 
     @Value("${monolit.news.cherinfo.rss-url}")
     private String rssLink = "https://cherinfo.ru/rss/news";
@@ -29,6 +39,11 @@ public class CherInfo implements Parser {
     @Override
     public List<NewsData> parseData() {
         List<NewsData> newsList = new ArrayList<>();
+        if (lastPubDate == null) {
+            lastPubDate = stateRepository.findById(SOURCE_KEY)
+                    .map(NewsParserState::getLastPubDate).map(Date::from).orElse(null);
+            log.info("Restored {} news checkpoint: {}", SOURCE_KEY, lastPubDate);
+        }
         SyndFeed feed = checkNewsUpdate();
 
         if (feed == null) {
@@ -68,14 +83,18 @@ public class CherInfo implements Parser {
         int indx = 0;
 
         for (SyndEntry entry : entries) {
-            if (entry.getPublishedDate().equals(lastPubDate) || indx == 5) {
-                indx = entries.indexOf(entry) + 1;
+            if (entry.getPublishedDate().equals(lastPubDate)
+                    || (lastPubDate == null && indx == INITIAL_NEWS_COUNT)) {
                 break;
             }
             indx++;
         }
 
         entries = entries.subList(0, indx);
+        NewsParserState state = new NewsParserState();
+        state.setSourceKey(SOURCE_KEY);
+        state.setLastPubDate(entries.get(0).getPublishedDate().toInstant());
+        stateRepository.save(state);
         lastPubDate = entries.get(0).getPublishedDate();
         Collections.reverse(entries);
 
