@@ -181,6 +181,20 @@ class CherInfoTest {
     }
 
     @Test
+    void readsEntireFeedWhenSavedCheckpointHasDroppedOutOfRss() {
+        storeCheckpoint(date(1));
+        rss.set(feed(9, 8, 7, 6, 5, 4, 3));
+
+        assertThat(parse()).extracting(NewsData::getTitle)
+                .containsExactly("News 3", "News 4", "News 5", "News 6", "News 7", "News 8", "News 9");
+        assertThat(storedState.get().getLastPubDate()).isEqualTo(date(9));
+        assertThat(parse()).isEmpty();
+        restartParser();
+        assertThat(parse()).isEmpty();
+        assertThat(articleRequests).hasValue(7);
+    }
+
+    @Test
     void keepsMemoryCheckpointWhenDatabaseHasAnOlderValue() {
         storeCheckpoint(date(1));
         ReflectionTestUtils.setField(parser, "lastPubDate", Date.from(date(3)));
