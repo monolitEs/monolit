@@ -83,7 +83,7 @@ class NewsButtonFlowTest {
         ArgumentCaptor<String> messages = ArgumentCaptor.forClass(String.class);
         verify(query, times(2)).message(messages.capture());
         assertThat(messages.getAllValues()).satisfiesExactly(
-                startup -> assertThat(startup).isEqualTo("Выберите действие:"),
+                startup -> assertThat(startup).isEqualTo("Бот готов."),
                 news -> assertThat(news).contains("Fresh article", "Full text."));
         verify(query, times(2)).execute();
     }

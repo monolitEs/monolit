@@ -20,7 +20,7 @@ public class VkKeyboardInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        messageSender.sendMessage("Выберите действие:", List.of(TEXT),
+        messageSender.sendMessage("Бот готов.", List.of(TEXT),
                 List.of("Получить новости"), List.of(LATEST_NEWS_PAYLOAD), false);
     }
 }
