@@ -14,10 +14,12 @@ import org.monolites.monolit.MonolitApplication;
 import org.monolites.monolit.configs.JacksonConfig;
 import org.monolites.monolit.handlers.callbacks.CallbackPayloadDispatcher;
 import org.monolites.monolit.handlers.callbacks.NewsCallbackPayloadHandler;
+import org.monolites.monolit.handlers.text.TextMessageDispatcher;
 import org.monolites.monolit.init.VkKeyboardInitializer;
 import org.monolites.monolit.models.dtos.NewsData;
 import org.monolites.monolit.parser.Parser;
 import org.monolites.monolit.repositories.NewsParserStateRepository;
+import org.monolites.monolit.services.DialogueModeService;
 import org.monolites.monolit.services.NewsService;
 import org.monolites.monolit.services.VkMessageSenderService;
 import org.springframework.boot.SpringApplication;
@@ -51,7 +53,8 @@ class NewsButtonFlowTest {
         NewsService service = new NewsService(List.of(parser), sender, Clock.systemUTC());
         var callback = new NewsCallbackPayloadHandler(service);
         var dispatcher = new CallbackPayloadDispatcher(mapper, List.of(callback));
-        var handler = new GroupLongPoolApiHandler(vk, actor, dispatcher, "42");
+        var textDispatcher = new TextMessageDispatcher(new DialogueModeService(), List.of());
+        var handler = new GroupLongPoolApiHandler(vk, actor, dispatcher, textDispatcher, "42");
 
         new VkKeyboardInitializer(sender).run();
 

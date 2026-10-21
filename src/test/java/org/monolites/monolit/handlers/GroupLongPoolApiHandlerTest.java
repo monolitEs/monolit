@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.monolites.monolit.configs.JacksonConfig;
 import org.monolites.monolit.handlers.callbacks.CallbackPayloadDispatcher;
 import org.monolites.monolit.handlers.callbacks.CallbackPayloadHandler;
+import org.monolites.monolit.handlers.text.TextMessageDispatcher;
 import org.monolites.monolit.models.dtos.callback.CallbackPayloadEnvelope;
 import org.monolites.monolit.services.VkMessageSenderService;
 
@@ -20,13 +21,16 @@ import static org.mockito.Mockito.*;
 
 class GroupLongPoolApiHandlerTest {
 
+    private final TextMessageDispatcher textDispatcher = mock(TextMessageDispatcher.class);
+
     @Test
     void ignoresPayloadFromUsersOtherThanConfiguredOwner() {
         CallbackPayloadDispatcher dispatcher = mock(CallbackPayloadDispatcher.class);
 
         handler(dispatcher).messageNew(1, event(99L, "Action", "{\"type\":\"test_action\"}"));
+        handler(dispatcher).messageNew(1, event(99L, "Text", null));
 
-        verifyNoInteractions(dispatcher);
+        verifyNoInteractions(dispatcher, textDispatcher);
     }
 
     @Test
@@ -38,6 +42,7 @@ class GroupLongPoolApiHandlerTest {
         handler(dispatcher).messageNew(1, event);
 
         verify(dispatcher).dispatch(payload, event);
+        verifyNoInteractions(textDispatcher);
     }
 
     @Test
@@ -46,7 +51,7 @@ class GroupLongPoolApiHandlerTest {
 
         handler(dispatcher).messageNew(1, event(null, "Action", "{}"));
 
-        verifyNoInteractions(dispatcher);
+        verifyNoInteractions(dispatcher, textDispatcher);
     }
 
     @Test
@@ -58,19 +63,25 @@ class GroupLongPoolApiHandlerTest {
         handler.messageNew(1, new MessageNew());
         handler.messageNew(1, new MessageNew().setObject(new MessageObject()));
 
-        verifyNoInteractions(dispatcher);
+        verifyNoInteractions(dispatcher, textDispatcher);
     }
 
     @Test
-    void doesNotDispatchPlainTextOrBlankPayload() {
+    void routesPlainTextAndBlankPayloadOnlyToTextDispatcher() {
         CallbackPayloadDispatcher dispatcher = mock(CallbackPayloadDispatcher.class);
         GroupLongPoolApiHandler handler = handler(dispatcher);
 
-        handler.messageNew(1, event(42L, "Text", null));
-        handler.messageNew(1, event(42L, "Text", ""));
-        handler.messageNew(1, event(42L, "Text", "  "));
+        MessageNew plainText = event(42L, "Text", null);
+        MessageNew emptyPayload = event(42L, "Text", "");
+        MessageNew blankPayload = event(42L, "Text", "  ");
+        handler.messageNew(1, plainText);
+        handler.messageNew(1, emptyPayload);
+        handler.messageNew(1, blankPayload);
 
         verifyNoInteractions(dispatcher);
+        verify(textDispatcher).dispatch(plainText);
+        verify(textDispatcher).dispatch(emptyPayload);
+        verify(textDispatcher).dispatch(blankPayload);
     }
 
     @Test
@@ -95,10 +106,12 @@ class GroupLongPoolApiHandlerTest {
         handler(dispatcher).messageNew(1, event);
 
         verify(actionHandler).handle(new TestPayload(7), event);
+        verifyNoInteractions(textDispatcher);
     }
 
     private GroupLongPoolApiHandler handler(CallbackPayloadDispatcher dispatcher) {
-        return new GroupLongPoolApiHandler(mock(VkApiClient.class), mock(GroupActor.class), dispatcher, "42");
+        return new GroupLongPoolApiHandler(
+                mock(VkApiClient.class), mock(GroupActor.class), dispatcher, textDispatcher, "42");
     }
 
     private MessageNew event(Long fromId, String text, String payload) {
