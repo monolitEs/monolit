@@ -1,12 +1,14 @@
 package org.monolites.monolit.init;
 
 import lombok.RequiredArgsConstructor;
+import org.monolites.monolit.handlers.callbacks.ChatCallbackPayloadHandler;
 import org.monolites.monolit.services.VkMessageSenderService;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Optional;
 
 import static com.vk.api.sdk.objects.messages.KeyboardButtonActionTextType.TEXT;
 import static org.monolites.monolit.handlers.callbacks.NewsCallbackPayloadHandler.LATEST_NEWS_PAYLOAD;
@@ -17,9 +19,14 @@ import static org.monolites.monolit.handlers.callbacks.NewsCallbackPayloadHandle
 public class VkKeyboardInitializer implements CommandLineRunner {
 
     private final VkMessageSenderService messageSender;
+    private final Optional<ChatCallbackPayloadHandler> chat;
 
     @Override
     public void run(String... args) {
+        if (chat.isPresent()) {
+            chat.get().showMenu("Бот готов.");
+            return;
+        }
         messageSender.sendMessage("Бот готов.", List.of(TEXT),
                 List.of("Получить новости"), List.of(LATEST_NEWS_PAYLOAD), false);
     }

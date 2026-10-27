@@ -30,6 +30,7 @@ import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProc
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -56,7 +57,7 @@ class NewsButtonFlowTest {
         var textDispatcher = new TextMessageDispatcher(new DialogueModeService(), List.of());
         var handler = new GroupLongPoolApiHandler(vk, actor, dispatcher, textDispatcher, "42");
 
-        new VkKeyboardInitializer(sender).run();
+        new VkKeyboardInitializer(sender, Optional.empty()).run();
 
         verify(parser, never()).parseData();
         ArgumentCaptor<Keyboard> keyboards = ArgumentCaptor.forClass(Keyboard.class);
