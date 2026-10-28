@@ -35,24 +35,22 @@ public class VkChatService {
     private final VkMessageSenderService sender;
     private final long ownerId;
     private final ExecutorService worker;
-    private final String conversationId;
+    private final ChatSessionService sessions;
     private final Duration timeout;
     private final AtomicBoolean active = new AtomicBoolean();
 
     @Autowired
     public VkChatService(CliToChatGptClient client, VkMessageSenderService sender,
                          @Value("${VK_MY_ID}") long ownerId,
-                         @Value("${monolit.chat.conversation-id}") String conversationId,
+                         ChatSessionService sessions,
                          @Value("${monolit.chat.request-timeout:PT11M}") Duration timeout) {
-        this(client, sender, ownerId, conversationId, timeout, Executors.newVirtualThreadPerTaskExecutor());
+        this(client, sender, ownerId, sessions, timeout, Executors.newVirtualThreadPerTaskExecutor());
     }
 
     VkChatService(CliToChatGptClient client, VkMessageSenderService sender,
-                  long ownerId, String conversationId, Duration timeout, ExecutorService worker) {
-        Assert.hasText(conversationId, "Chat conversationId must not be blank");
-        Assert.isTrue(conversationId.length() <= 256, "Chat conversationId must not exceed 256 characters");
+                  long ownerId, ChatSessionService sessions, Duration timeout, ExecutorService worker) {
         Assert.isTrue(timeout.toMillis() > 0, "Chat timeout must be positive");
-        this.conversationId = conversationId;
+        this.sessions = sessions;
         this.timeout = timeout;
         this.client = client;
         this.sender = sender;
@@ -70,12 +68,46 @@ public class VkChatService {
         if (!accepts(event)) {
             return;
         }
-        if (!active.compareAndSet(false, true)) {
-            sender.sendMessage(BUSY);
+        if (!tryStart()) {
             return;
         }
+        String conversationId = sessions.currentConversationId();
+        execute(() -> answer(text, conversationId));
+    }
+
+    public void startNewConversation(MessageNew event) {
+        if (!accepts(event) || !tryStart()) {
+            return;
+        }
+        execute(() -> {
+            try {
+                sessions.startNewConversation();
+                log.info("Chat conversation switched");
+                sender.sendMessage("Новый чат готов. Напишите сообщение.");
+            } catch (RuntimeException e) {
+                log.warn("Chat switch failed category={}", e.getClass().getSimpleName());
+                sender.sendMessage("Не удалось начать новый чат. Попробуйте позже.");
+            }
+        });
+    }
+
+    private boolean tryStart() {
+        if (active.compareAndSet(false, true)) {
+            return true;
+        }
+        sender.sendMessage(BUSY);
+        return false;
+    }
+
+    private void execute(Runnable operation) {
         try {
-            worker.execute(() -> answer(text));
+            worker.execute(() -> {
+                try {
+                    operation.run();
+                } finally {
+                    active.set(false);
+                }
+            });
         } catch (RejectedExecutionException e) {
             active.set(false);
             log.warn("Chat request failed category=REJECTED");
@@ -83,7 +115,7 @@ public class VkChatService {
         }
     }
 
-    private void answer(String text) {
+    private void answer(String text, String conversationId) {
         long started = System.nanoTime();
         Future<ResponseEntity<ChatResponse>> pending = null;
         try {
@@ -110,7 +142,6 @@ public class VkChatService {
             if (pending != null) {
                 pending.cancel(true);
             }
-            active.set(false);
         }
     }
 

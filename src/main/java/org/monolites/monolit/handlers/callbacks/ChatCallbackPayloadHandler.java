@@ -23,6 +23,7 @@ public class ChatCallbackPayloadHandler implements CallbackPayloadHandler<String
 
     public static final CallbackPayloadEnvelope ENTER_CHAT_PAYLOAD = new CallbackPayloadEnvelope("chat", 1, "enter");
     public static final CallbackPayloadEnvelope EXIT_CHAT_PAYLOAD = new CallbackPayloadEnvelope("chat", 1, "exit");
+    public static final CallbackPayloadEnvelope NEW_CHAT_PAYLOAD = new CallbackPayloadEnvelope("chat", 1, "new");
 
     private final DialogueModeService modes;
     private final VkChatService chat;
@@ -57,6 +58,11 @@ public class ChatCallbackPayloadHandler implements CallbackPayloadHandler<String
                 modes.setMode(DEFAULT);
                 showMenu("Вы вышли из режима ChatGPT.");
             }
+            case "new" -> {
+                if (modes.currentMode() == CHATGPT) {
+                    chat.startNewConversation(event);
+                }
+            }
             default -> {
                 // Unknown commands are ignored to preserve the current dialogue mode.
             }
@@ -68,8 +74,14 @@ public class ChatCallbackPayloadHandler implements CallbackPayloadHandler<String
     }
 
     private void showKeyboard(String message, boolean chatting) {
+        if (chatting) {
+            sender.sendMessage(message, List.of(TEXT, TEXT),
+                    List.of("Новый чат", "Выход"),
+                    List.of(NEW_CHAT_PAYLOAD, EXIT_CHAT_PAYLOAD), false);
+            return;
+        }
         sender.sendMessage(message, List.of(TEXT, TEXT),
-                List.of("Получить новости", chatting ? "Выход" : "ChatGPT"),
-                List.of(LATEST_NEWS_PAYLOAD, chatting ? EXIT_CHAT_PAYLOAD : ENTER_CHAT_PAYLOAD), false);
+                List.of("Получить новости", "ChatGPT"),
+                List.of(LATEST_NEWS_PAYLOAD, ENTER_CHAT_PAYLOAD), false);
     }
 }

@@ -11,8 +11,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.monolites.monolit.clients.CliToChatGptClient;
+import org.monolites.monolit.configs.JacksonConfig;
+import org.monolites.monolit.handlers.callbacks.CallbackPayloadDispatcher;
+import org.monolites.monolit.handlers.callbacks.ChatCallbackPayloadHandler;
 import org.monolites.monolit.models.dtos.chat.ChatRequest;
 import org.monolites.monolit.models.dtos.chat.ChatResponse;
+import org.monolites.monolit.models.entities.ChatSession;
+import org.monolites.monolit.repositories.ChatSessionRepository;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +27,7 @@ import org.springframework.web.client.RestClientResponseException;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,7 +38,15 @@ class VkChatServiceTest {
     private final CliToChatGptClient client = mock(CliToChatGptClient.class);
     private final VkMessageSenderService sender = mock(VkMessageSenderService.class);
     private final ManualExecutor worker = new ManualExecutor();
-    private final VkChatService chat = new VkChatService(client, sender, 42L, "fixture", Duration.ofSeconds(5), worker);
+    private final ChatSessionRepository repository = mock(ChatSessionRepository.class);
+    private final ChatSessionService sessions;
+    private final VkChatService chat;
+
+    VkChatServiceTest() {
+        when(repository.findById("main")).thenReturn(Optional.of(new ChatSession("main", "fixture")));
+        sessions = new ChatSessionService(repository);
+        chat = new VkChatService(client, sender, 42L, sessions, Duration.ofSeconds(5), worker);
+    }
 
     private static RestClientResponseException httpError(int status) {
         var headers = new HttpHeaders();
@@ -123,9 +137,86 @@ class VkChatServiceTest {
         chat.ask(event(99L, 99L, "Foreign"));
         chat.ask(event(42L, 2_000_000_001L, "Group"));
         chat.ask(event(42L, null, "Missing peer"));
+        chat.startNewConversation(event(99L, 99L, "New"));
+        chat.startNewConversation(event(42L, 2_000_000_001L, "New"));
+        chat.startNewConversation(event(42L, null, "New"));
 
         assertThat(worker.pending).isNull();
         verifyNoInteractions(client, sender);
+        verify(repository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void newConversationSharesSlotAndQuestionsKeepTheIdSelectedAtAdmission() {
+        when(client.chat(any())).thenReturn(ResponseEntity.ok(new ChatResponse("fixture", "Ответ")));
+
+        chat.ask(event(42L, 42L, "Before"));
+        chat.startNewConversation(event(42L, 42L, "New while busy"));
+        assertThat(sessions.currentConversationId()).isEqualTo("fixture");
+        verify(repository, never()).saveAndFlush(any());
+        worker.runNext();
+
+        chat.startNewConversation(event(42L, 42L, "New"));
+        chat.ask(event(42L, 42L, "While switching"));
+        chat.startNewConversation(event(42L, 42L, "Second switch"));
+        verify(repository, never()).saveAndFlush(any());
+        worker.runNext();
+        String nextId = sessions.currentConversationId();
+        assertThat(nextId).isNotEqualTo("fixture");
+
+        chat.ask(event(42L, 42L, "After"));
+        worker.runNext();
+        verify(client).chat(refEq(new ChatRequest("Before", "fixture")));
+        verify(client).chat(refEq(new ChatRequest("After", nextId)));
+        verify(client, times(2)).chat(any());
+        verify(repository).saveAndFlush(any());
+        verify(sender, times(3)).sendMessage("Чат занят, повторите позже.");
+        verify(sender).sendMessage("Новый чат готов. Напишите сообщение.");
+    }
+
+    @Test
+    void failedSaveKeepsConversationAndReleasesSlotWithoutSuccessMessage() {
+        when(repository.saveAndFlush(any())).thenThrow(new org.springframework.dao.DataAccessResourceFailureException("PRIVATE_DB_DETAIL"));
+        when(client.chat(any())).thenReturn(ResponseEntity.ok(new ChatResponse("fixture", "Recovered")));
+
+        chat.startNewConversation(event(42L, 42L, "New"));
+        worker.runNext();
+        chat.ask(event(42L, 42L, "After failure"));
+        worker.runNext();
+
+        verify(sender).sendMessage("Не удалось начать новый чат. Попробуйте позже.");
+        verify(sender, never()).sendMessage("Новый чат готов. Напишите сообщение.");
+        verify(client).chat(refEq(new ChatRequest("After failure", "fixture")));
+    }
+
+    @Test
+    void newChatPayloadThenExitAndReenterUseTheNewConversation() throws Exception {
+        var modes = new DialogueModeService();
+        var callback = new ChatCallbackPayloadHandler(modes, chat, sender);
+        var mapper = new JacksonConfig().objectMapper();
+        var dispatcher = new CallbackPayloadDispatcher(mapper, List.of(callback));
+        var event = event(42L, 42L, "Button");
+        String newPayload = mapper.writeValueAsString(ChatCallbackPayloadHandler.NEW_CHAT_PAYLOAD);
+        dispatcher.dispatch(newPayload, event);
+        assertThat(worker.pending).isNull();
+
+        dispatcher.dispatch(mapper.writeValueAsString(ChatCallbackPayloadHandler.ENTER_CHAT_PAYLOAD), event);
+        dispatcher.dispatch(newPayload, event);
+        worker.runNext();
+        String selected = sessions.currentConversationId();
+        assertThat(selected).isNotEqualTo("fixture");
+        dispatcher.dispatch(mapper.writeValueAsString(ChatCallbackPayloadHandler.EXIT_CHAT_PAYLOAD), event);
+        dispatcher.dispatch(mapper.writeValueAsString(ChatCallbackPayloadHandler.ENTER_CHAT_PAYLOAD), event);
+        when(client.chat(any())).thenReturn(ResponseEntity.ok(new ChatResponse("new", "Answer")));
+        chat.ask(event(42L, 42L, "First question"));
+        worker.runNext();
+        chat.ask(event(42L, 42L, "Followup"));
+        worker.runNext();
+
+        verify(client).chat(refEq(new ChatRequest("First question", selected)));
+        verify(client).chat(refEq(new ChatRequest("Followup", selected)));
+        verify(repository).saveAndFlush(any());
+        assertThat(modes.currentMode()).isEqualTo(DialogueModeService.Mode.CHATGPT);
     }
 
     @Test
@@ -158,9 +249,11 @@ class VkChatServiceTest {
 
         chat.ask(event(42L, 42L, "Question"));
         chat.ask(event(42L, 42L, "Another"));
+        chat.startNewConversation(event(42L, 42L, "New"));
 
-        verify(sender, times(2)).sendMessage("Сервис чата недоступен. Попробуйте позже.");
+        verify(sender, times(3)).sendMessage("Сервис чата недоступен. Попробуйте позже.");
         verifyNoInteractions(client);
+        verify(repository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -173,7 +266,7 @@ class VkChatServiceTest {
             blocked.await();
             return ResponseEntity.ok(new ChatResponse("fixture", "Unreachable"));
         });
-        VkChatService service = new VkChatService(client, sender, 42L, "fixture", Duration.ofSeconds(5), executor);
+        VkChatService service = new VkChatService(client, sender, 42L, sessions, Duration.ofSeconds(5), executor);
         try {
             service.ask(event(42L, 42L, "Question"));
             assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();

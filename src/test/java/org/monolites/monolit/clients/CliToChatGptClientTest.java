@@ -13,6 +13,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.monolites.monolit.configs.ChatClientConfig;
 import org.monolites.monolit.models.dtos.chat.ChatRequest;
+import org.monolites.monolit.services.ChatSessionService;
 import org.monolites.monolit.services.VkChatService;
 import org.monolites.monolit.services.VkMessageSenderService;
 import org.springframework.web.client.RestClient;
@@ -192,7 +193,9 @@ class CliToChatGptClientTest {
         private final VkChatService chat;
 
         ChatSession(CliToChatGptClient client, VkMessageSenderService sender, Duration timeout) {
-            chat = new VkChatService(client, sender, 42L, "fixture", timeout);
+            var sessions = mock(ChatSessionService.class);
+            when(sessions.currentConversationId()).thenReturn("fixture");
+            chat = new VkChatService(client, sender, 42L, sessions, timeout);
         }
 
         @Override
