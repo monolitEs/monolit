@@ -50,7 +50,6 @@ jobs:
           SONAR_HOST_URL: https://sonarcloud.io
           SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
           SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
-          SONAR_SCANNER_SKIP_JRE_PROVISIONING: 'true'
         run: |
           set -euo pipefail
           : "${SONAR_TOKEN:?Set GitHub secret SONAR_TOKEN; fork PR analysis is unavailable}"
@@ -62,7 +61,8 @@ jobs:
             "-Dsonar.projectKey=$SONAR_PROJECT_KEY" \
             -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
             -Dsonar.qualitygate.wait=true \
-            -Dsonar.qualitygate.timeout=300
+            -Dsonar.qualitygate.timeout=300 \
+            -Dsonar.scanner.skipJreProvisioning=true
 
       - name: Upload reports
         if: always()
