@@ -13,8 +13,10 @@ services:
       VK_GROUP_ID: ${VK_GROUP_ID:?Set VK_GROUP_ID}
       VK_GROUP_TOKEN: ${VK_GROUP_TOKEN:?Set VK_GROUP_TOKEN}
       VK_MY_ID: ${VK_MY_ID:?Set VK_MY_ID}
+      MONOLIT_CHAT_ENABLED: ${MONOLIT_CHAT_ENABLED:-true}
     networks:
       - database
+      - chat
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "-T", "2", "-O", "/dev/null", "http://127.0.0.1:8080/actuator/health"]
@@ -32,3 +34,6 @@ networks:
   database:
     external: true
     name: ${POSTGRES_NETWORK:-infra-db}
+  chat:
+    external: true
+    name: cli-to-chat

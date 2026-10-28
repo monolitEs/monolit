@@ -23,6 +23,11 @@ java -jar target/monolit-0.0.1-SNAPSHOT.jar
 При запуске появляется клавиатура; новости Cherinfo отправляются по кнопке «Получить новости».
 Таблицы создаются и обновляются через Hibernate `ddl-auto=update`.
 
+Интеграция с ChatGPT включена по умолчанию. Адрес REST и ID диалога —
+в [application.properties](src/main/resources/application.properties).
+Для Docker нужна существующая сеть `cli-to-chat` от Compose REST-сервиса.
+Кнопка «ChatGPT» включает режим; «Выход» возвращает обычный режим, сохраняя историю.
+
 ## Docker и GitHub Actions
 
 Для сборки образа используйте [Dockerfile](Dockerfile).

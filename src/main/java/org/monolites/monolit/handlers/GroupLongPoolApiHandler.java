@@ -5,6 +5,7 @@ import com.vk.api.sdk.client.actors.GroupActor;
 import com.vk.api.sdk.events.longpoll.GroupLongPollApi;
 import com.vk.api.sdk.objects.callback.MessageNew;
 import org.monolites.monolit.handlers.callbacks.CallbackPayloadDispatcher;
+import org.monolites.monolit.handlers.text.TextMessageDispatcher;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -12,16 +13,19 @@ import org.springframework.stereotype.Component;
 public class GroupLongPoolApiHandler extends GroupLongPollApi {
 
     private final CallbackPayloadDispatcher callbackPayloadDispatcher;
+    private final TextMessageDispatcher textMessageDispatcher;
     private final long ownerId;
 
     public GroupLongPoolApiHandler(
             VkApiClient client,
             GroupActor actor,
             CallbackPayloadDispatcher callbackPayloadDispatcher,
+            TextMessageDispatcher textMessageDispatcher,
             @Value("${VK_MY_ID}") String ownerId
     ) {
         super(client, actor, 25);
         this.callbackPayloadDispatcher = callbackPayloadDispatcher;
+        this.textMessageDispatcher = textMessageDispatcher;
         this.ownerId = Long.parseLong(ownerId.trim());
     }
 
@@ -38,6 +42,8 @@ public class GroupLongPoolApiHandler extends GroupLongPollApi {
         String payload = vkMessage.getPayload();
         if (payload != null && !payload.isBlank()) {
             callbackPayloadDispatcher.dispatch(payload, message);
+            return;
         }
+        textMessageDispatcher.dispatch(message);
     }
 }
