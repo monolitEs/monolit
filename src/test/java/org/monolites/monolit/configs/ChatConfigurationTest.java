@@ -13,6 +13,7 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration;
 import org.springframework.boot.autoconfigure.web.client.RestClientAutoConfiguration;
 import org.springframework.boot.convert.ApplicationConversionService;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,18 +32,20 @@ class ChatConfigurationTest {
             .withBean(VkMessageSenderService.class, () -> sender);
 
     @Test
-    void disabledChatNeedsNoUrlConversationIdOrOwnerAndKeepsNewsOnlyKeyboard() {
-        runner.run(context -> {
-            assertThat(context).hasNotFailed();
-            assertThat(context).doesNotHaveBean(CliToChatGptClient.class);
-            assertThat(context).doesNotHaveBean(VkChatService.class);
-            assertThat(context).doesNotHaveBean(ChatCallbackPayloadHandler.class);
-            assertThat(context).doesNotHaveBean(ChatGptTextMessageHandler.class);
-            verifyNoInteractions(sender);
-            context.getBean(VkKeyboardInitializer.class).run();
-            verify(sender).sendMessage(eq("Бот готов."), anyList(), eq(java.util.List.of("Получить новости")),
-                    anyList(), eq(false));
-        });
+    void disabledChatOverridesApplicationDefaultAndKeepsNewsOnlyKeyboard() {
+        runner.withInitializer(new ConfigDataApplicationContextInitializer())
+                .withPropertyValues("monolit.chat.enabled=false")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean(CliToChatGptClient.class);
+                    assertThat(context).doesNotHaveBean(VkChatService.class);
+                    assertThat(context).doesNotHaveBean(ChatCallbackPayloadHandler.class);
+                    assertThat(context).doesNotHaveBean(ChatGptTextMessageHandler.class);
+                    verifyNoInteractions(sender);
+                    context.getBean(VkKeyboardInitializer.class).run();
+                    verify(sender).sendMessage(eq("Бот готов."), anyList(), eq(java.util.List.of("Получить новости")),
+                            anyList(), eq(false));
+                });
     }
 
     @Test
@@ -59,6 +62,18 @@ class ChatConfigurationTest {
                     context.getBean(VkKeyboardInitializer.class).run();
                     verify(sender).sendMessage(eq("Бот готов."), anyList(),
                             eq(java.util.List.of("Получить новости", "ChatGPT")), anyList(), eq(false));
+                });
+    }
+
+    @Test
+    void chatEnabledByDefaultFromApplicationProperties() {
+        runner.withInitializer(new ConfigDataApplicationContextInitializer())
+                .withPropertyValues("VK_MY_ID=42")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(CliToChatGptClient.class);
+                    assertThat(context).hasSingleBean(VkChatService.class);
+                    verifyNoInteractions(sender);
                 });
     }
 

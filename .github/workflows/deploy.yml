@@ -28,6 +28,7 @@ jobs:
       POSTGRES_NETWORK: ${{ vars.POSTGRES_NETWORK || 'infra-db' }}
       VK_GROUP_ID: ${{ vars.VK_GROUP_ID }}
       VK_MY_ID: ${{ vars.VK_MY_ID }}
+      MONOLIT_CHAT_ENABLED: ${{ vars.MONOLIT_CHAT_ENABLED || 'true' }}
 
     steps:
       - name: Checkout pushed commit
