@@ -30,21 +30,7 @@ jobs:
       MAVEN_OPTS: -Dmaven.repo.local=/tmp/m2
       SONAR_USER_HOME: /tmp/sonar
 
-    steps:
-      - name: Check SonarCloud
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: |
-          if [ -z "$SONAR_TOKEN" ]; then
-            echo "SONAR_TOKEN is empty"
-            exit 1
-          fi
-      
-          curl -sS -D - -o /dev/null \
-            -H "Authorization: Bearer $SONAR_TOKEN" \
-            'https://api.sonarcloud.io/analysis/jres?os=linux&arch=x86_64' \
-            | grep -Ei '^(HTTP/|server:|content-type:)'
-    
+    steps:  
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -64,6 +50,7 @@ jobs:
           SONAR_HOST_URL: https://sonarcloud.io
           SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
           SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          SONAR_SCANNER_SKIP_JRE_PROVISIONING: 'true'
         run: |
           set -euo pipefail
           : "${SONAR_TOKEN:?Set GitHub secret SONAR_TOKEN; fork PR analysis is unavailable}"
