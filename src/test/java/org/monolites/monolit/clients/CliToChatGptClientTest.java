@@ -89,7 +89,7 @@ class CliToChatGptClientTest {
 
     @ParameterizedTest
     @ValueSource(ints = {400, 409, 502, 503, 504})
-    void returnsErrorStatusAndRequestIdWithoutRetryOrPublishingRawBody(int errorStatus) throws Exception {
+    void returnsErrorStatusAndRequestIdWithoutRetryOrPublishingRawBody(int errorStatus) {
         client = client(Duration.ofSeconds(5));
         status = errorStatus;
         response = "not-json: private upstream detail";
@@ -151,7 +151,7 @@ class CliToChatGptClientTest {
     }
 
     @Test
-    void doesNotFollowRedirects() throws Exception {
+    void doesNotFollowRedirects() {
         client = client(Duration.ofSeconds(5));
         status = 307;
 

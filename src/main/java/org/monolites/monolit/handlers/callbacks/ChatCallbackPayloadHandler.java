@@ -58,6 +58,7 @@ public class ChatCallbackPayloadHandler implements CallbackPayloadHandler<String
                 showMenu("Вы вышли из режима ChatGPT.");
             }
             default -> {
+                // Unknown commands are ignored to preserve the current dialogue mode.
             }
         }
     }

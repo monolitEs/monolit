@@ -46,7 +46,7 @@ class VkChatServiceTest {
     }
 
     @Test
-    void schedulesWithoutWaitingRejectsSecondQuestionAndReleasesSlotAfterSuccess() throws Exception {
+    void schedulesWithoutWaitingRejectsSecondQuestionAndReleasesSlotAfterSuccess() {
         when(client.chat(any())).thenReturn(ResponseEntity.ok(new ChatResponse("fixture", "Ответ")));
 
         chat.ask(event(42L, 42L, "First"));
@@ -65,7 +65,7 @@ class VkChatServiceTest {
 
     @ParameterizedTest
     @ValueSource(ints = {400, 409, 502, 503, 504})
-    void reportsHttpErrorsAndReleasesSlotWithoutRetry(int status) throws Exception {
+    void reportsHttpErrorsAndReleasesSlotWithoutRetry(int status) {
         when(client.chat(any())).thenThrow(httpError(status))
                 .thenReturn(ResponseEntity.ok(new ChatResponse("next", "Recovered")));
 
@@ -86,7 +86,7 @@ class VkChatServiceTest {
     }
 
     @Test
-    void reportsNetworkAndDeadlineFailuresAndCanAcceptAnotherQuestion() throws Exception {
+    void reportsNetworkAndDeadlineFailuresAndCanAcceptAnotherQuestion() {
         when(client.chat(any())).thenThrow(new ResourceAccessException("private detail"), new ResourceAccessException("timeout", new HttpTimeoutException("deadline")))
                 .thenReturn(ResponseEntity.ok(new ChatResponse("fixture", "Recovered")));
 
@@ -101,7 +101,7 @@ class VkChatServiceTest {
     }
 
     @Test
-    void splitsLongAnswerWithoutLosingTextOrBreakingEmoji() throws Exception {
+    void splitsLongAnswerWithoutLosingTextOrBreakingEmoji() {
         String answer = "x".repeat(3899) + "🙂" + "y".repeat(4100);
         when(client.chat(any())).thenReturn(ResponseEntity.ok(new ChatResponse("fixture", answer)));
 
@@ -129,7 +129,7 @@ class VkChatServiceTest {
     }
 
     @Test
-    void logsCorrelationAndCategoryWithoutPromptAnswerOrRawFailureDetails() throws Exception {
+    void logsCorrelationAndCategoryWithoutPromptAnswerOrRawFailureDetails() {
         Logger logger = (Logger) LoggerFactory.getLogger(VkChatService.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
@@ -235,12 +235,12 @@ class VkChatServiceTest {
 
         @Override
         public boolean isTerminated() {
-            return shutdown;
+            return isShutdown();
         }
 
         @Override
         public boolean awaitTermination(long timeout, TimeUnit unit) {
-            return shutdown;
+            return isTerminated();
         }
     }
 }

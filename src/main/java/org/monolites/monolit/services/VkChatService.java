@@ -29,7 +29,7 @@ public class VkChatService {
     private static final int MAX_MESSAGE_LENGTH = 3900;
     private static final String BUSY = "Чат занят, повторите позже.";
     private static final String UNAVAILABLE = "Сервис чата недоступен. Попробуйте позже.";
-    private static final String TIMEOUT = "Ответ чата не получен вовремя. Попробуйте позже.";
+    private static final String TIMEOUT_MESSAGE = "Ответ чата не получен вовремя. Попробуйте позже.";
 
     private final CliToChatGptClient client;
     private final VkMessageSenderService sender;
@@ -101,13 +101,11 @@ public class VkChatService {
             } else {
                 sender.sendMessage(UNAVAILABLE);
             }
-        } catch (TimeoutException e) {
+        } catch (TimeoutException | ExecutionException | RuntimeException e) {
             reportFailure(e, started);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("Chat request failed category=INTERRUPTED durationMs={}", (System.nanoTime() - started) / 1_000_000);
-        } catch (ExecutionException | RuntimeException e) {
-            reportFailure(e, started);
         } finally {
             if (pending != null) {
                 pending.cancel(true);
@@ -127,21 +125,22 @@ public class VkChatService {
                     (System.nanoTime() - started) / 1_000_000);
             message = switch (status) {
                 case 409 -> BUSY;
-                case 504 -> TIMEOUT;
+                case 504 -> TIMEOUT_MESSAGE;
                 default -> UNAVAILABLE;
             };
         } else {
             log.warn("Chat request failed category={} durationMs={}", cause.getClass().getSimpleName(),
                     (System.nanoTime() - started) / 1_000_000);
             if (cause instanceof TimeoutException || cause instanceof HttpTimeoutException) {
-                message = TIMEOUT;
+                message = TIMEOUT_MESSAGE;
             }
         }
         sender.sendMessage(message);
     }
 
     private void sendParts(String answer) {
-        for (int start = 0; start < answer.length(); ) {
+        int start = 0;
+        while (start < answer.length()) {
             int end = Math.min(start + MAX_MESSAGE_LENGTH, answer.length());
             if (end < answer.length() && Character.isHighSurrogate(answer.charAt(end - 1))
                     && Character.isLowSurrogate(answer.charAt(end))) {
