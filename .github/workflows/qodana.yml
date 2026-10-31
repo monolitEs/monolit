@@ -1,0 +1,27 @@
+name: Qodana Code Quality
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  qodana:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Qodana Scan
+        uses: JetBrains/qodana-action@v2026.2
+        with:
+          args: |
+            --linter qodana-jvm-community
+            --within-docker false
+          upload-result: true
