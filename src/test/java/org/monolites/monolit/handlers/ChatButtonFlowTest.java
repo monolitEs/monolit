@@ -106,7 +106,7 @@ class ChatButtonFlowTest {
             verify(query, atLeastOnce()).keyboard(keyboards.capture());
             assertThat(keyboards.getValue().getButtons().stream().flatMap(List::stream)
                     .map(button -> ((KeyboardButtonActionText) button.getAction()).getLabel()))
-                    .containsExactly("Новый чат", "Выход");
+                    .containsExactly("Новый чат", "Мышление", "Выход");
             handler.messageNew(1, event(42L, 42L, "Unknown", "{\"type\":\"chat\",\"version\":1,\"data\":\"unknown\"}"));
             handler.messageNew(1, event(42L, 42L, "Unknown", "{\"type\":\"unknown\",\"version\":1,\"data\":null}"));
             handler.messageNew(1, event(42L, 42L, "Malformed", "not-json"));
