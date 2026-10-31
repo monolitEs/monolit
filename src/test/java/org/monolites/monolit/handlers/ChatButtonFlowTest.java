@@ -20,10 +20,9 @@ import org.monolites.monolit.handlers.text.TextMessageDispatcher;
 import org.monolites.monolit.init.VkKeyboardInitializer;
 import org.monolites.monolit.models.dtos.chat.ChatRequest;
 import org.monolites.monolit.models.dtos.chat.ChatResponse;
-import org.monolites.monolit.services.DialogueModeService;
-import org.monolites.monolit.services.NewsService;
-import org.monolites.monolit.services.VkChatService;
-import org.monolites.monolit.services.VkMessageSenderService;
+import org.monolites.monolit.models.entities.ChatSession;
+import org.monolites.monolit.repositories.ChatSessionRepository;
+import org.monolites.monolit.services.*;
 import org.springframework.http.ResponseEntity;
 
 import java.time.Duration;
@@ -78,7 +77,10 @@ class ChatButtonFlowTest {
             answerSent.countDown();
             return query;
         });
-        var chat = new VkChatService(client, sender, 42L, "fixture", Duration.ofSeconds(5));
+        var repository = mock(ChatSessionRepository.class);
+        when(repository.findById("main")).thenReturn(Optional.of(new ChatSession("main", "fixture")));
+        var sessions = new ChatSessionService(repository);
+        var chat = new VkChatService(client, sender, 42L, sessions, Duration.ofSeconds(5));
         try {
             var callback = new ChatCallbackPayloadHandler(modes, chat, sender);
             var news = mock(NewsService.class);
@@ -89,6 +91,7 @@ class ChatButtonFlowTest {
 
             new VkKeyboardInitializer(sender, Optional.of(callback)).run();
             String enter = action(query, "ChatGPT").getPayload();
+            String newsPayload = action(query, "Получить новости").getPayload();
             handler.messageNew(1, event(42L, 42L, "ChatGPT", null));
             handler.messageNew(1, event(99L, 99L, "ChatGPT", enter));
             handler.messageNew(1, event(42L, 2_000_000_001L, "ChatGPT", enter));
@@ -98,7 +101,12 @@ class ChatButtonFlowTest {
             handler.messageNew(1, event(42L, 42L, "ChatGPT", enter));
             assertThat(modes.currentMode()).isEqualTo(CHATGPT);
             String exit = action(query, "Выход").getPayload();
-            String newsPayload = action(query, "Получить новости").getPayload();
+            String newChat = action(query, "Новый чат").getPayload();
+            ArgumentCaptor<Keyboard> keyboards = ArgumentCaptor.forClass(Keyboard.class);
+            verify(query, atLeastOnce()).keyboard(keyboards.capture());
+            assertThat(keyboards.getValue().getButtons().stream().flatMap(List::stream)
+                    .map(button -> ((KeyboardButtonActionText) button.getAction()).getLabel()))
+                    .containsExactly("Новый чат", "Мышление", "Выход");
             handler.messageNew(1, event(42L, 42L, "Unknown", "{\"type\":\"chat\",\"version\":1,\"data\":\"unknown\"}"));
             handler.messageNew(1, event(42L, 42L, "Unknown", "{\"type\":\"unknown\",\"version\":1,\"data\":null}"));
             handler.messageNew(1, event(42L, 42L, "Malformed", "not-json"));
@@ -108,14 +116,18 @@ class ChatButtonFlowTest {
             assertTimeoutPreemptively(Duration.ofSeconds(2), () ->
                     handler.messageNew(1, event(42L, 42L, "Question", null)));
             assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            handler.messageNew(1, event(42L, 42L, "Новый чат", newChat));
+            verify(repository, never()).saveAndFlush(any());
             handler.messageNew(1, event(42L, 42L, "Second question", null));
-            verify(query).message("Чат занят, повторите позже.");
+            verify(query, times(2)).message("Чат занят, повторите позже.");
             handler.messageNew(1, event(42L, 42L, "Получить новости", newsPayload));
             verify(news).publishLatestNews();
 
             handler.messageNew(1, event(42L, 42L, "Выход", exit));
             assertThat(modes.currentMode()).isEqualTo(DEFAULT);
             handler.messageNew(1, event(42L, 42L, "Ignored after exit", null));
+            handler.messageNew(1, event(42L, 42L, "Новый чат", newChat));
+            verify(repository, never()).saveAndFlush(any());
             release.countDown();
             assertThat(answerSent.await(5, TimeUnit.SECONDS)).isTrue();
             assertThat(modes.currentMode()).isEqualTo(DEFAULT);
@@ -125,6 +137,9 @@ class ChatButtonFlowTest {
 
             handler.messageNew(1, event(42L, 42L, "ChatGPT", enter));
             assertThat(modes.currentMode()).isEqualTo(CHATGPT);
+            handler.messageNew(1, event(99L, 99L, "Новый чат", newChat));
+            handler.messageNew(1, event(42L, 2_000_000_001L, "Новый чат", newChat));
+            verify(repository, never()).saveAndFlush(any());
             assertThat(new DialogueModeService().currentMode()).isEqualTo(DEFAULT);
         } finally {
             release.countDown();

@@ -6,6 +6,8 @@ import org.monolites.monolit.handlers.callbacks.ChatCallbackPayloadHandler;
 import org.monolites.monolit.handlers.text.ChatGptTextMessageHandler;
 import org.monolites.monolit.handlers.text.TextMessageDispatcher;
 import org.monolites.monolit.init.VkKeyboardInitializer;
+import org.monolites.monolit.repositories.ChatSessionRepository;
+import org.monolites.monolit.services.ChatSessionService;
 import org.monolites.monolit.services.DialogueModeService;
 import org.monolites.monolit.services.VkChatService;
 import org.monolites.monolit.services.VkMessageSenderService;
@@ -22,14 +24,16 @@ import static org.mockito.Mockito.*;
 class ChatConfigurationTest {
 
     private final VkMessageSenderService sender = mock(VkMessageSenderService.class);
+    private final ChatSessionRepository sessions = mock(ChatSessionRepository.class);
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration.class, RestClientAutoConfiguration.class))
             .withInitializer(context -> context.getBeanFactory()
                     .setConversionService(ApplicationConversionService.getSharedInstance()))
             .withUserConfiguration(JacksonConfig.class, DialogueModeService.class, TextMessageDispatcher.class,
-                    ChatClientConfig.class, VkChatService.class, ChatCallbackPayloadHandler.class,
+                    ChatClientConfig.class, ChatSessionService.class, VkChatService.class, ChatCallbackPayloadHandler.class,
                     ChatGptTextMessageHandler.class, VkKeyboardInitializer.class)
-            .withBean(VkMessageSenderService.class, () -> sender);
+            .withBean(VkMessageSenderService.class, () -> sender)
+            .withBean(ChatSessionRepository.class, () -> sessions);
 
     @Test
     void disabledChatOverridesApplicationDefaultAndKeepsNewsOnlyKeyboard() {
@@ -39,9 +43,11 @@ class ChatConfigurationTest {
                     assertThat(context).hasNotFailed();
                     assertThat(context).doesNotHaveBean(CliToChatGptClient.class);
                     assertThat(context).doesNotHaveBean(VkChatService.class);
+                    assertThat(context).doesNotHaveBean(ChatSessionService.class);
                     assertThat(context).doesNotHaveBean(ChatCallbackPayloadHandler.class);
                     assertThat(context).doesNotHaveBean(ChatGptTextMessageHandler.class);
                     verifyNoInteractions(sender);
+                    verifyNoInteractions(sessions);
                     context.getBean(VkKeyboardInitializer.class).run();
                     verify(sender).sendMessage(eq("Бот готов."), anyList(), eq(java.util.List.of("Получить новости")),
                             anyList(), eq(false));
@@ -51,7 +57,7 @@ class ChatConfigurationTest {
     @Test
     void enabledChatWiresHandlersAndStartupKeyboardWithoutRequestingModel() {
         runner.withPropertyValues("monolit.chat.enabled=true", "VK_MY_ID=42",
-                        "monolit.chat.base-url=http://127.0.0.1:1", "monolit.chat.conversation-id=fixture")
+                        "monolit.chat.base-url=http://127.0.0.1:1")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(CliToChatGptClient.class);
@@ -79,19 +85,7 @@ class ChatConfigurationTest {
 
     @Test
     void enabledChatRequiresConfiguration() {
-        runner.withPropertyValues("monolit.chat.enabled=true", "VK_MY_ID=42",
-                        "monolit.chat.conversation-id=fixture")
+        runner.withPropertyValues("monolit.chat.enabled=true", "VK_MY_ID=42")
                 .run(context -> assertThat(context).hasFailed());
-        runner.withPropertyValues("monolit.chat.enabled=true", "VK_MY_ID=42",
-                        "monolit.chat.base-url=http://127.0.0.1:1")
-                .run(context -> assertThat(context).hasFailed());
-    }
-
-    @Test
-    void enabledChatRejectsInvalidConversationId() {
-        runner.withPropertyValues("monolit.chat.enabled=true", "VK_MY_ID=42",
-                        "monolit.chat.base-url=http://127.0.0.1:1", "monolit.chat.conversation-id= ")
-                .run(context -> assertThat(context.getStartupFailure())
-                        .hasRootCauseInstanceOf(IllegalArgumentException.class));
     }
 }

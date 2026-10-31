@@ -5,7 +5,8 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.monolites.monolit.clients.CliToChatGptClient;
 import org.monolites.monolit.models.dtos.chat.ChatRequest;
-import org.monolites.monolit.models.dtos.chat.ChatResponse;
+import org.monolites.monolit.models.dtos.chat.ChatSettingsRequest;
+import org.monolites.monolit.models.dtos.chat.ChatSettingsResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -13,13 +14,16 @@ import org.springframework.core.NestedExceptionUtils;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 @Slf4j
 @Service
@@ -35,24 +39,22 @@ public class VkChatService {
     private final VkMessageSenderService sender;
     private final long ownerId;
     private final ExecutorService worker;
-    private final String conversationId;
+    private final ChatSessionService sessions;
     private final Duration timeout;
     private final AtomicBoolean active = new AtomicBoolean();
 
     @Autowired
     public VkChatService(CliToChatGptClient client, VkMessageSenderService sender,
                          @Value("${VK_MY_ID}") long ownerId,
-                         @Value("${monolit.chat.conversation-id}") String conversationId,
+                         ChatSessionService sessions,
                          @Value("${monolit.chat.request-timeout:PT11M}") Duration timeout) {
-        this(client, sender, ownerId, conversationId, timeout, Executors.newVirtualThreadPerTaskExecutor());
+        this(client, sender, ownerId, sessions, timeout, Executors.newVirtualThreadPerTaskExecutor());
     }
 
     VkChatService(CliToChatGptClient client, VkMessageSenderService sender,
-                  long ownerId, String conversationId, Duration timeout, ExecutorService worker) {
-        Assert.hasText(conversationId, "Chat conversationId must not be blank");
-        Assert.isTrue(conversationId.length() <= 256, "Chat conversationId must not exceed 256 characters");
+                  long ownerId, ChatSessionService sessions, Duration timeout, ExecutorService worker) {
         Assert.isTrue(timeout.toMillis() > 0, "Chat timeout must be positive");
-        this.conversationId = conversationId;
+        this.sessions = sessions;
         this.timeout = timeout;
         this.client = client;
         this.sender = sender;
@@ -70,12 +72,108 @@ public class VkChatService {
         if (!accepts(event)) {
             return;
         }
-        if (!active.compareAndSet(false, true)) {
-            sender.sendMessage(BUSY);
+        if (!tryStart()) {
             return;
         }
+        String conversationId = sessions.currentConversationId();
+        execute(() -> answer(text, conversationId));
+    }
+
+    public void startNewConversation(MessageNew event) {
+        if (!accepts(event) || !tryStart()) {
+            return;
+        }
+        execute(() -> {
+            try {
+                sessions.startNewConversation();
+                log.info("Chat conversation switched");
+                sender.sendMessage("Новый чат готов. Напишите сообщение.");
+            } catch (RuntimeException e) {
+                log.warn("Chat switch failed category={}", e.getClass().getSimpleName());
+                sender.sendMessage("Не удалось начать новый чат. Попробуйте позже.");
+            }
+        });
+    }
+
+    private static boolean conversationNotFound(RestClientResponseException response) {
         try {
-            worker.execute(() -> answer(text));
+            var body = response.getResponseBodyAs(Map.class);
+            return body != null && "CONVERSATION_NOT_FOUND".equals(body.get("code"));
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    public void readThinking(MessageNew event, Consumer<ChatSettingsResponse> onSuccess) {
+        thinking(event, null, null, onSuccess);
+    }
+
+    public void changeThinking(MessageNew event, String conversationId, String effort,
+                               Consumer<ChatSettingsResponse> onSuccess) {
+        thinking(event, conversationId, effort, onSuccess);
+    }
+
+    private void thinking(MessageNew event, String expectedId, String effort,
+                          Consumer<ChatSettingsResponse> onSuccess) {
+        if (!accepts(event) || !tryStart()) {
+            return;
+        }
+        String conversationId = sessions.currentConversationId();
+        if (expectedId != null && !expectedId.equals(conversationId)) {
+            active.set(false);
+            sender.sendMessage("Это настройки старого чата. Откройте «Мышление» заново.");
+            return;
+        }
+        execute(() -> {
+            long started = System.nanoTime();
+            try {
+                var settings = await(() -> fetchSettings(conversationId, effort, started));
+                if (settings == null) {
+                    sender.sendMessage("Не удалось определить текущую модель. Попробуйте позже.");
+                } else {
+                    onSuccess.accept(settings);
+                }
+            } catch (TimeoutException | ExecutionException | RuntimeException e) {
+                reportFailure(e, started, true);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Chat settings failed category=INTERRUPTED durationMs={}", (System.nanoTime() - started) / 1_000_000);
+            }
+        });
+    }
+
+    private ChatSettingsResponse fetchSettings(String conversationId, String effort, long started) {
+        var current = settings(client.getSettings(conversationId), conversationId, started);
+        if (effort == null) {
+            return current;
+        }
+        if (!StringUtils.hasText(current.model())) {
+            return null;
+        }
+        var updated = settings(client.updateSettings(conversationId,
+                new ChatSettingsRequest(current.model(), effort)), conversationId, started);
+        Assert.isTrue(current.model().equals(updated.model()) && effort.equals(updated.reasoningEffort()),
+                "Chat settings response must match the requested model and effort");
+        return updated;
+    }
+
+    private boolean tryStart() {
+        if (active.compareAndSet(false, true)) {
+            return true;
+        }
+        sender.sendMessage(BUSY);
+        return false;
+    }
+
+    private void execute(Runnable operation) {
+        try {
+            worker.execute(() -> {
+                try {
+                    operation.run();
+                } finally {
+                    active.set(false);
+                }
+            });
         } catch (RejectedExecutionException e) {
             active.set(false);
             log.warn("Chat request failed category=REJECTED");
@@ -83,13 +181,21 @@ public class VkChatService {
         }
     }
 
-    private void answer(String text) {
+    private ChatSettingsResponse settings(ResponseEntity<ChatSettingsResponse> response, String conversationId, long started) {
+        var body = response.getBody();
+        Assert.isTrue(response.getStatusCode().value() == 200, "Chat settings requires status 200");
+        Assert.notNull(body, "Chat settings requires a body");
+        Assert.hasText(body.requestId(), "Chat settings requires requestId");
+        Assert.isTrue(conversationId.equals(body.conversationId()), "Chat settings must match conversationId");
+        log.info("Chat settings status={} requestId={} durationMs={}", response.getStatusCode().value(),
+                body.requestId(), (System.nanoTime() - started) / 1_000_000);
+        return body;
+    }
+
+    private void answer(String text, String conversationId) {
         long started = System.nanoTime();
-        Future<ResponseEntity<ChatResponse>> pending = null;
         try {
-            pending = worker.submit(() -> client.chat(new ChatRequest(text, conversationId)));
-            // JDK readTimeout covers headers; this deadline also covers body decoding.
-            var response = pending.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            var response = await(() -> client.chat(new ChatRequest(text, conversationId)));
             var reply = response.getBody();
             Assert.notNull(reply, "Chat response requires a body");
             Assert.hasText(reply.getRequestId(), "Chat response requires requestId");
@@ -102,19 +208,24 @@ public class VkChatService {
                 sender.sendMessage(UNAVAILABLE);
             }
         } catch (TimeoutException | ExecutionException | RuntimeException e) {
-            reportFailure(e, started);
+            reportFailure(e, started, false);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("Chat request failed category=INTERRUPTED durationMs={}", (System.nanoTime() - started) / 1_000_000);
-        } finally {
-            if (pending != null) {
-                pending.cancel(true);
-            }
-            active.set(false);
         }
     }
 
-    private void reportFailure(Throwable failure, long started) {
+    private <T> T await(Callable<T> operation) throws InterruptedException, ExecutionException, TimeoutException {
+        var pending = worker.submit(operation);
+        try {
+            // JDK readTimeout covers headers; this deadline also covers body decoding.
+            return pending.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } finally {
+            pending.cancel(true);
+        }
+    }
+
+    private void reportFailure(Throwable failure, long started, boolean settings) {
         Throwable cause = NestedExceptionUtils.getMostSpecificCause(failure);
         String message = UNAVAILABLE;
         if (cause instanceof RestClientResponseException response) {
@@ -124,6 +235,9 @@ public class VkChatService {
             log.warn("Chat response status={} requestId={} durationMs={}", status, requestId,
                     (System.nanoTime() - started) / 1_000_000);
             message = switch (status) {
+                case 400 -> settings ? "Этот уровень мышления недоступен для текущей модели." : UNAVAILABLE;
+                case 404 -> settings && conversationNotFound(response)
+                        ? "Сначала отправьте сообщение в этом чате, затем откройте «Мышление»." : UNAVAILABLE;
                 case 409 -> BUSY;
                 case 504 -> TIMEOUT_MESSAGE;
                 default -> UNAVAILABLE;
