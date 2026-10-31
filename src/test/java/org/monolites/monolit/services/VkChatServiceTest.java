@@ -411,6 +411,20 @@ class VkChatServiceTest {
         verify(sender).sendMessage("Сервис чата недоступен. Попробуйте позже.");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"new", "thinking", "back"})
+    void chatControlButtonsAreIgnoredInDefaultMode(String payload) {
+        var modes = new DialogueModeService();
+        var callback = new ChatCallbackPayloadHandler(modes, chat, sender);
+
+        callback.handle(payload, event(42L, 42L, "Button"));
+
+        assertThat(modes.currentMode()).isEqualTo(DialogueModeService.Mode.DEFAULT);
+        assertThat(worker.pending).isNull();
+        verifyNoInteractions(client, sender);
+        verify(repository, never()).saveAndFlush(any());
+    }
+
     @Test
     void thinkingKeyboardDoesNotReplaceBackOrExitWhileRequestIsPending() {
         when(client.getSettings("fixture")).thenReturn(ResponseEntity.ok(new ChatSettingsResponse("read", "fixture", "m", "low")));

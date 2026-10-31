@@ -127,20 +127,7 @@ public class VkChatService {
         execute(() -> {
             long started = System.nanoTime();
             try {
-                var settings = await(() -> {
-                    var current = settings(client.getSettings(conversationId), conversationId, started);
-                    if (effort == null) {
-                        return current;
-                    }
-                    if (!StringUtils.hasText(current.model())) {
-                        return null;
-                    }
-                    var updated = settings(client.updateSettings(conversationId,
-                            new ChatSettingsRequest(current.model(), effort)), conversationId, started);
-                    Assert.isTrue(current.model().equals(updated.model()) && effort.equals(updated.reasoningEffort()),
-                            "Chat settings response must match the requested model and effort");
-                    return updated;
-                });
+                var settings = await(() -> fetchSettings(conversationId, effort, started));
                 if (settings == null) {
                     sender.sendMessage("Не удалось определить текущую модель. Попробуйте позже.");
                 } else {
@@ -153,6 +140,21 @@ public class VkChatService {
                 log.warn("Chat settings failed category=INTERRUPTED durationMs={}", (System.nanoTime() - started) / 1_000_000);
             }
         });
+    }
+
+    private ChatSettingsResponse fetchSettings(String conversationId, String effort, long started) {
+        var current = settings(client.getSettings(conversationId), conversationId, started);
+        if (effort == null) {
+            return current;
+        }
+        if (!StringUtils.hasText(current.model())) {
+            return null;
+        }
+        var updated = settings(client.updateSettings(conversationId,
+                new ChatSettingsRequest(current.model(), effort)), conversationId, started);
+        Assert.isTrue(current.model().equals(updated.model()) && effort.equals(updated.reasoningEffort()),
+                "Chat settings response must match the requested model and effort");
+        return updated;
     }
 
     private boolean tryStart() {

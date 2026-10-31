@@ -67,22 +67,15 @@ public class ChatCallbackPayloadHandler implements CallbackPayloadHandler<String
                 modes.setMode(DEFAULT);
                 showMenu("Вы вышли из режима ChatGPT.");
             }
-            case "new" -> {
-                if (modes.currentMode() == CHATGPT) {
+            case String command when command.equals("new") && modes.currentMode() == CHATGPT ->
                     chat.startNewConversation(event);
-                }
+            case String command when command.equals("thinking") && modes.currentMode() == CHATGPT -> {
+                long version = keyboardVersion;
+                chat.readThinking(event, settings -> showThinking(settings, version));
             }
-            case "thinking" -> {
-                if (modes.currentMode() == CHATGPT) {
-                    long version = keyboardVersion;
-                    chat.readThinking(event, settings -> showThinking(settings, version));
-                }
-            }
-            case "back" -> {
-                if (modes.currentMode() == CHATGPT) {
-                    keyboardVersion++;
-                    showKeyboard("Напишите сообщение.", true);
-                }
+            case String command when command.equals("back") && modes.currentMode() == CHATGPT -> {
+                keyboardVersion++;
+                showKeyboard("Напишите сообщение.", true);
             }
             default -> {
                 String[] parts = payload.split(":", 3);
